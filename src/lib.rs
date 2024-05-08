@@ -1,16 +1,14 @@
 use near_sdk::{
-    env::{self, current_account_id},
-    log, near, require,
+    env::{self}, near, require,
     store::{LookupMap, Vector},
     AccountId,
 };
-//, near_bindgen, env, store::{LookupMap, Vector}};
-//use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 
-const COMMIT_PROPOSAL_DURATION_BLOCKS: u64 = 5; //REMEMBER EPOCH
+
+const COMMIT_PROPOSAL_DURATION_BLOCKS: u64 = 5; 
 const REVEAL_PROPOSAL_DURATION_BLOCKS: u64 = 1;
 
-// Define the contract structure
+
 #[near(contract_state)]
 pub struct Contract {
     creator: AccountId,
@@ -22,25 +20,27 @@ pub struct Contract {
     claimed: LookupMap<AccountId, bool>,
 }
 
-// //To initialize the contract
-// impl Default for Contract{
-//     fn default() -> Self {
-//         Self {
-//             creator: env::current_account_id(),
-//             guess_deadline: env::block_height() + COMMIT_PROPOSAL_DURATION_BLOCKS,
-//             reveal_deadline: env::block_height() + COMMIT_PROPOSAL_DURATION_BLOCKS + REVEAL_PROPOSAL_DURATION_BLOCKS,
-//             total_prize: 100, //esta variable creo que no se usaría
-//             commitments: LookupMap::new(b"map_com".to_vec()),  //verificar los ultimos 3 valores
-//             winners: Vector::new(b"vec_com".to_vec()),
-//             claimed: LookupMap::new(b"map_claim".to_vec()),
-//         }
-//     }
-// }
+
+impl Default for Contract {
+    fn default() -> Self {
+        Self {
+            creator: env::current_account_id(),
+            guess_deadline: env::block_height() + COMMIT_PROPOSAL_DURATION_BLOCKS,
+            reveal_deadline: env::block_height()
+                + COMMIT_PROPOSAL_DURATION_BLOCKS
+                + REVEAL_PROPOSAL_DURATION_BLOCKS,
+            total_prize: 100, //esta variable creo que no se usaría
+            commitments: LookupMap::new(b"map_com".to_vec()),
+            winners: Vector::new(b"vec_com".to_vec()),
+            claimed: LookupMap::new(b"map_claim".to_vec()),
+        }
+    }
+}
 
 #[near]
 impl Contract {
     #[init]
-    pub fn new(commitment_offchain : String) -> Self {
+    pub fn new() -> Self {
         Self {
             creator: env::current_account_id(),
             guess_deadline: env::block_height() + COMMIT_PROPOSAL_DURATION_BLOCKS,
@@ -54,36 +54,34 @@ impl Contract {
         }
     }
 
-    //constructor recibe el commitment del creador
     pub fn set_commit_creator(&mut self, correct_answer: String) {
-        self.commitments
-            .insert(env::current_account_id(), correct_answer);
+        let caller = env::current_account_id();
+        require!(caller == self.creator, "You are not the owner");
+        let value = Contract::new_commitment(correct_answer);
+        self.commitments.insert(caller, value);
     }
 
-    //Agrega el commitment de un participante
-    pub fn new_commitment(user: AccountId, answer: String) -> String {
-        let mut concat_values = user.to_string();
-        concat_values.push_str(&answer);
-        let concat_values = concat_values.as_bytes();
-        let hash_value = env::keccak256(concat_values);
+    pub fn new_commitment(answer: String) -> String {
+        let answer_as_bytes = answer.as_bytes();
+        let hash_value = env::keccak256(answer_as_bytes);
         let hash_string = String::from_utf8_lossy(&hash_value);
         return hash_string.to_string();
     }
 
-    //agregar los commitment, pero verifica que no sea el creador o alguien que ya habia participado
-    pub fn guess(&mut self, user: AccountId, answer: String) {
-        //verifica que está dentro del tiempo permitido
-        require!(
-            env::block_height() < self.guess_deadline,
-            "Close proposal time"
-        );
-
-        //predecessor_account_id es el accountId que llamó a este método
-        require!(
-            env::predecessor_account_id() != self.creator,
-            "You are the creator"
-        );
-        self.commitments.insert(user, answer);
+    pub fn guess(&mut self, user: AccountId, answer: String) -> bool{
+      
+        if env::block_height() >= self.guess_deadline {
+            return false;
+        }
+    
+        // Verifica que no sea el creador
+        if user == self.creator {
+            return false;
+        }
+    
+        let value = Contract::new_commitment(answer);
+        self.commitments.insert(user, value);
+        true
     }
 
     pub fn reveal_proposal(&mut self, answer: String) {
@@ -96,46 +94,30 @@ impl Contract {
             "Close reveal time"
         );
 
-        //Verificar que el commitment ya existia en la lista
-        //TODO la funcion new proposal regresa un vector y el commitment es una LookupMap
-        require!(
-            Contract::new_commitment(env::predecessor_account_id(), answer)
-                == self.commitments.get(&self.creator)
-        );
+        let answer_to_verify = Contract::new_commitment(answer);
+        let answer_saved = self.commitments.get(&env::predecessor_account_id());
 
-        //Verificar que el commitment del creator tambien está en la lista
-        //TODO, buscar el commitment del creator
-        require!(Contract::new_proposal_commit(self.creator, answer) == self.commitments[creator]);
+        if let Some(answer) = answer_saved {
+            require!(*answer == answer_to_verify, "No answer register");
+        }
 
-        // Si el commitment del jugador y del creador existen,  y el jugador aun no está en
-        // la lista de ganadores
-        require!(!Contract::is_winner(self, user));
+        let creator = self.creator.clone();
+        let answer_creator = self.commitments.get(&creator);
+
+        require!(Some(answer_creator) == Some(answer_saved));
+        require!(!Contract::is_winner(self, env::predecessor_account_id()));
+        self.winners.push(env::predecessor_account_id());
     }
 
     pub fn is_winner(&mut self, user: AccountId) -> bool {
-        let winner = false;
-
-        //TODO: corregir el iterador para ver si ya existe en la lista de ganadores
-        for user in self.winners {
-            winner = true;
-            break;
+        let mut exist = false;
+        for winner in self.winners.iter() {
+            if *winner == user {
+                exist = true;
+                break;
+            }
         }
-        return winner;
-    }
-
-    pub fn claim(&mut self, user: AccountId) {
-        require!(env::block_height() > REVEAL_PROPOSAL_DURATION_BLOCKS);
-
-        //buscar en la lista de claimed que no lo reclamara aun
-        require!(self.claimed == false);
-
-        //que la dirección que quiere claimear está en la lista de ganadores
-        require!(Contract::is_winner(self, user));
-
-        let payout = self.total_prize / self.winners.len();
-
-        //TODO: buscar en el map de claimed y cambiar el valor a true
-        self.claimed[user] = true;
+        return exist;
     }
 }
 
@@ -145,15 +127,72 @@ mod tests {
 
     #[test]
     fn new_self() {
+        let creator = env::current_account_id();
+        let initial_block = env::block_height();
         let contract = Contract::new();
-        // this test did not call set_greeting so should return the default "Hello" greeting
-        let creator = assert_eq!(contract.get_greeting(), "Hello");
+
+        assert_eq!(contract.creator, creator);
+        assert_eq!(contract.guess_deadline, initial_block + 5);
+        assert_eq!(contract.reveal_deadline, initial_block + 5 + 1);
+        assert_eq!(contract.total_prize, 100);
+        assert!(contract.winners.len() == 0, "Else");
     }
 
     #[test]
-    fn set_then_get_greeting() {
-        let mut contract = Contract::default();
-        contract.set_greeting("howdy".to_string());
-        assert_eq!(contract.get_greeting(), "howdy");
+    fn test_set_commit_creator() {
+        let mut contract = Contract::new();
+        let value =Contract::new_commitment("true".to_string());
+        contract.set_commit_creator("true".to_string());
+
+        let commit_value =contract.commitments.get(&env::current_account_id());
+        match commit_value {
+            Some(commitment_string) => {
+                assert_eq!(*commitment_string, value);
+            }
+            None=> {
+                panic!("no existe el value");
+            }
+        }
+    }
+
+    #[test]
+    fn test_guess() {
+
+        let mut contract = Contract::new();
+        
+        let creator: AccountId = "alice.near".parse().unwrap();
+        let user2: AccountId = "edson.near".parse().unwrap();
+        let answer = "true".to_string();
+
+        contract.creator = creator.clone();
+        contract.guess_deadline = 100; 
+
+        let creator_call = contract.guess(creator, answer.clone());
+        assert!(!creator_call, "Creator calls the function");
+
+        let user2_call = contract.guess(user2.clone(), answer.clone());
+        println!("el valor del bool del user2 es: {}", user2_call);
+        assert!(user2_call, "Un nuevo usuario no pudo participar");
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_guess_panic(){
+
+        let mut contract = Contract::new();
+        
+        let creator: AccountId = "alice.near".parse().unwrap();
+        let user1: AccountId = "hassel.near".parse().unwrap();
+        let answer = "true".to_string();
+
+        contract.creator = creator.clone();
+        contract.guess_deadline = 100;
+        contract.guess(user1.clone(), answer.clone());
+        let user1_call = contract.guess(user1.clone(), answer.clone());
+        assert!(user1_call, "No se registro respuesta");
+        let user1_call2 = contract.guess(user1.clone(), answer.clone());
+        println!("bool segunda llamada: {}", user1_call2);
+        panic!("Ya participaste");
+
     }
 }
