@@ -74,7 +74,6 @@ impl Contract {
             return false;
         }
     
-        // Verifica que no sea el creador
         if user == self.creator {
             return false;
         }
@@ -135,7 +134,7 @@ mod tests {
         assert_eq!(contract.guess_deadline, initial_block + 5);
         assert_eq!(contract.reveal_deadline, initial_block + 5 + 1);
         assert_eq!(contract.total_prize, 100);
-        assert!(contract.winners.len() == 0, "Else");
+        assert!(contract.winners.len() == 0, "Instance fail");
     }
 
     #[test]
@@ -150,7 +149,7 @@ mod tests {
                 assert_eq!(*commitment_string, value);
             }
             None=> {
-                panic!("no existe el value");
+                panic!("value doesn't exist");
             }
         }
     }
@@ -171,8 +170,7 @@ mod tests {
         assert!(!creator_call, "Creator calls the function");
 
         let user2_call = contract.guess(user2.clone(), answer.clone());
-        println!("el valor del bool del user2 es: {}", user2_call);
-        assert!(user2_call, "Un nuevo usuario no pudo participar");
+        assert!(user2_call, "New user can't participate");
     }
 
     #[test]
@@ -189,10 +187,9 @@ mod tests {
         contract.guess_deadline = 100;
         contract.guess(user1.clone(), answer.clone());
         let user1_call = contract.guess(user1.clone(), answer.clone());
-        assert!(user1_call, "No se registro respuesta");
+        assert!(user1_call, "Answer no register");
         let user1_call2 = contract.guess(user1.clone(), answer.clone());
-        println!("bool segunda llamada: {}", user1_call2);
-        panic!("Ya participaste");
+        panic!("You have a register answer");
 
     }
 }
