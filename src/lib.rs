@@ -29,7 +29,7 @@ impl Default for Contract {
             reveal_deadline: env::block_height()
                 + COMMIT_PROPOSAL_DURATION_BLOCKS
                 + REVEAL_PROPOSAL_DURATION_BLOCKS,
-            total_prize: 100, //esta variable creo que no se usaría
+            total_prize: 100, 
             commitments: LookupMap::new(b"map_com".to_vec()),
             winners: Vector::new(b"vec_com".to_vec()),
             claimed: LookupMap::new(b"map_claim".to_vec()),
